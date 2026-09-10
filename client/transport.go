@@ -172,6 +172,23 @@ func (rt *roundTripper) h1Transport(snap dialSnapshot) http.RoundTripper {
 			MaxIdleConnsPerHost: 8,
 			IdleConnTimeout:     90 * time.Second,
 		}
+		if snap.proxy != nil {
+			proxy := snap.proxy
+			// Cleartext targets must go through net/http's own proxy support
+			// (absolute-form request line); without this they were dialled
+			// directly and the proxy was silently bypassed. TLS targets are
+			// tunnelled by DialTLSContext, which performs the CONNECT itself,
+			// so they must not be proxied twice.
+			t.Proxy = func(req *http.Request) (*url.URL, error) {
+				if req.URL.Scheme != "http" {
+					return nil, nil
+				}
+				if proxy.Scheme != "http" {
+					return nil, fmt.Errorf("client: plain http:// targets require a plain http:// proxy, got %q", proxy.Scheme)
+				}
+				return proxy, nil
+			}
+		}
 		rt.h1 = t
 	}
 	return rt.h1

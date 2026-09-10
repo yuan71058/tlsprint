@@ -282,9 +282,11 @@ func (r *Request) Execute(method, rawURL string, headers ...map[string]string) (
 	out.rawBody = raw
 	out.body = decodeBody(resp.Header.Get("Content-Encoding"), raw)
 
-	// Decode into the result target on 2xx.
+	// Decode into the result target on 2xx. Decode the *decompressed* body:
+	// presets send Accept-Encoding themselves, which suppresses net/http's
+	// transparent decompression, so raw holds compressed wire bytes.
 	if r.result != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if err := json.Unmarshal(raw, r.result); err != nil {
+		if err := json.Unmarshal(out.body, r.result); err != nil {
 			return out, fmt.Errorf("client: decode response into result: %w", err)
 		}
 	}

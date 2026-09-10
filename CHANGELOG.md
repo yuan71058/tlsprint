@@ -3,6 +3,38 @@
 All notable changes to tlsprint are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [v1.0.3] - 2026-09-10
+
+模块标签：`http2/v1.0.1`、`client/v1.0.3`（`client` 现在依赖 `http2 v1.0.1`）。
+
+### Fixed
+
+- **http2** (fork): the receive window enforced locally is now aligned with the
+  window a `Fingerprint` advertises on the wire. A preset that advertises a
+  wider stream window than the transport's 4 MiB default (Chrome 6 MiB, curl
+  8.4 10 MiB, OkHttp 16 MiB — 29 of the 47 curated presets) let a fully
+  compliant server overflow the client's own accounting, tearing the connection
+  down with a spurious `FLOW_CONTROL_ERROR` partway through any body larger than
+  ~4 MiB. The connection-level window is aligned the same way. Covered by
+  `TestFingerprintAdvertisedWindowIsEnforcedLocally` (8 MiB body across five
+  advertised windows).
+- **client**: `SetResult` decoded the raw, still-compressed response body rather
+  than the decompressed one, so it failed with `invalid character '\x1f'` on any
+  gzip/br/zstd-encoded 2xx. Presets send `Accept-Encoding` themselves, which
+  suppresses net/http's transparent decompression. It now decodes the same bytes
+  as `Response.JSON`.
+- **client**: the top-level `client.Get(..., Impersonate("firefox-145"))` form
+  sent the *default* preset's headers (e.g. Chrome's User-Agent) on top of the
+  requested preset's TLS fingerprint, because `Impersonate` assigned the preset
+  without re-applying header defaults or rebuilding the transports. It now
+  routes through `SetBrowser`, so headers and connections follow the preset.
+- **client**: plain `http://` targets silently bypassed a configured proxy and
+  were dialled directly. They now go through net/http's proxy support
+  (absolute-form request line), while `https://` targets keep the existing
+  CONNECT tunnel. A cleartext target therefore requires a plaintext proxy; an
+  `https://` proxy combined with an `http://` target now reports an explicit
+  error instead of quietly connecting directly.
+
 ## [v1.0.2] - 2026-09-03
 
 ### Fixed
@@ -22,7 +54,7 @@ All notable changes to tlsprint are documented here. This project adheres to
   the original compressed bytes. Fixes `invalid character '\x8f'` when parsing
   a brotli-encoded JSON response (e.g. TikTok) without manual decoding.
 
-## [Unreleased]
+## [v1.0.0]
 
 Initial open-source release.
 

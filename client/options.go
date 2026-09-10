@@ -18,17 +18,20 @@ type ReqOption func(*Request)
 
 // Impersonate selects the fingerprint preset at construction time (or in a
 // top-level convenience call). It mirrors curl_cffi's `impersonate=`.
+//
+// It applies the preset through Client.SetBrowser so the preset's default
+// headers (User-Agent, sec-ch-ua, Accept-Language, ...) are installed and the
+// cached transports are rebuilt. Assigning the preset alone would leave the
+// previous preset's headers in place.
 func Impersonate(browser any) Option {
 	return func(c *Client) {
 		switch v := browser.(type) {
 		case *preset.Preset:
 			if v != nil {
-				c.preset = v
+				_ = c.SetBrowser(v)
 			}
 		case string:
-			if p := preset.MustBuiltin().Lookup(v); p != nil {
-				c.preset = p
-			}
+			_ = c.SetBrowser(v)
 		}
 	}
 }

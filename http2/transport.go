@@ -218,6 +218,17 @@ type Fingerprint struct {
 	PriorityFrames []StreamPriorityFrame
 }
 
+// fingerprintSetting returns the value of the first SETTINGS parameter with
+// the given id in a fingerprint's ordered SETTINGS list.
+func fingerprintSetting(settings []Setting, id SettingID) (uint32, bool) {
+	for _, s := range settings {
+		if s.ID == id {
+			return s.Val, true
+		}
+	}
+	return 0, false
+}
+
 // StreamPriority is an HTTP/2 stream priority. Weight is the on-wire
 // zero-indexed value (weight-1, so 255 represents Chrome's "weight 256").
 type StreamPriority struct {
@@ -893,6 +904,20 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook 
 		cc.tlsState = &state
 	}
 
+	// A Fingerprint replaces the SETTINGS this transport advertises on the
+	// wire, but the receive windows it enforces locally are derived from the
+	// configuration (4 MiB per stream by default). Those two must agree:
+	// a preset that advertises a wider window than we enforce (Chrome
+	// advertises 6 MiB) lets a fully compliant peer overflow our accounting,
+	// which takeInflows reports as a connection-level FLOW_CONTROL_ERROR.
+	// Widen the locally enforced window to cover whatever we advertise.
+	if t.Fingerprint != nil {
+		if v, ok := fingerprintSetting(t.Fingerprint.Settings, SettingInitialWindowSize); ok &&
+			v > uint32(cc.initialStreamRecvWindowSize) && v <= math.MaxInt32 {
+			cc.initialStreamRecvWindowSize = int32(v)
+		}
+	}
+
 	initialSettings := []Setting{
 		{ID: SettingEnablePush, Val: 0},
 		{ID: SettingInitialWindowSize, Val: uint32(cc.initialStreamRecvWindowSize)},
@@ -925,7 +950,16 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook 
 			})
 		}
 	}
-	cc.inflow.init(conf.MaxUploadBufferPerConnection + initialWindowSize)
+	// The connection-level receive window must likewise cover the window we
+	// advertise: the SETTINGS default (65535) plus the WINDOW_UPDATE increment
+	// written above.
+	connRecvWindow := conf.MaxUploadBufferPerConnection + initialWindowSize
+	if t.Fingerprint != nil && t.Fingerprint.WindowUpdate != 0 {
+		if adv := int64(initialWindowSize) + int64(t.Fingerprint.WindowUpdate); adv > int64(connRecvWindow) && adv <= math.MaxInt32 {
+			connRecvWindow = int32(adv)
+		}
+	}
+	cc.inflow.init(connRecvWindow)
 	cc.bw.Flush()
 	if cc.werr != nil {
 		cc.Close()
